@@ -189,9 +189,14 @@ class Notification(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     citizen_id = Column(Integer, ForeignKey("citizens.id"), nullable=False)
+    booth_id = Column(Integer, ForeignKey("booths.id"), nullable=True)
     work_id = Column(Integer, ForeignKey("civic_works.id"), nullable=True)
     message = Column(Text, nullable=False)
+    message_en = Column(Text, nullable=True)
+    message_hi = Column(Text, nullable=True)
+    message_mr = Column(Text, nullable=True)
     language = Column(String(20), default="English")
+    delivery_status = Column(String(20), default="pending")
     sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     delivered = Column(Boolean, default=False)
     
