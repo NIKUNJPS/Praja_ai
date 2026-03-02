@@ -12,6 +12,7 @@ from database import get_db
 import models
 import notification_service
 import logging
+from websocket import connection_manager
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,21 @@ async def create_civic_work_with_notifications(
     
     logger.info(f"🎯 Notification engine: {notifications_count} notifications to {len(affected_citizens)} citizens")
     logger.info(f"⏱️ Total execution time: {execution_time_ms:.0f}ms")
+    
+    # 5. Emit WebSocket event for real-time dashboard update
+    await connection_manager.broadcast_event("civic_work_created", {
+        "work_id": new_work.id,
+        "title": new_work.title,
+        "category": new_work.category,
+        "booth_id": new_work.booth_id,
+        "affected_citizens": len(affected_citizens),
+        "notifications_created": notifications_count,
+        "booths_impacted": booths_impacted,
+        "budget": new_work.budget,
+        "execution_time_ms": round(execution_time_ms, 2)
+    })
+    
+    logger.info("📡 WebSocket event emitted: civic_work_created")
     
     return {
         "civic_work_id": new_work.id,

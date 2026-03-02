@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, BarChart3, Network, Home, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { LogOut, BarChart3, Network, Home, TrendingUp, TrendingDown, AlertTriangle, Activity } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { Toaster, toast } from 'sonner';
 import api from '../services/api';
+import websocketService from '../services/websocket';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -11,10 +13,54 @@ const Dashboard = () => {
   const [stats, setStats] = useState(null);
   const [boothsHealth, setBoothsHealth] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [activityFeed, setActivityFeed] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
+    
+    // Initialize WebSocket
+    websocketService.connect();
+    
+    // Listen for connection status
+    websocketService.on('connection_status', handleConnectionStatus);
+    
+    // Listen for civic work events
+    websocketService.on('civic_work_created', handleCivicWorkCreated);
+    
+    // Cleanup on unmount
+    return () => {
+      websocketService.off('connection_status', handleConnectionStatus);
+      websocketService.off('civic_work_created', handleCivicWorkCreated);
+    };
   }, []);
+
+  const handleConnectionStatus = (status) => {
+    setWsConnected(status.connected);
+  };
+
+  const handleCivicWorkCreated = (event) => {
+    const { data } = event;
+    
+    // Show toast notification
+    toast.success(`🚧 New ${data.category} Project`, {
+      description: `${data.title} - ${data.affected_citizens} citizens notified`
+    });
+    
+    // Add to activity feed
+    setActivityFeed(prev => [{
+      id: Date.now(),
+      type: 'civic_work_created',
+      title: data.title,
+      category: data.category,
+      citizens: data.affected_citizens,
+      notifications: data.notifications_created,
+      timestamp: event.timestamp
+    }, ...prev.slice(0, 19)]);  // Keep last 20
+    
+    // Refresh dashboard data
+    fetchDashboardData();
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -38,11 +84,25 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0B1120] via-[#0F172A] to-[#1E293B]">
+      <Toaster position="top-right" richColors />
+      
       {/* Top Navigation */}
       <nav className="bg-[#0B1120]/80 backdrop-blur-xl border-b border-blue-500/20 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-8">
             <h1 className="text-2xl font-bold text-white">ICIOS Dashboard</h1>
+            
+            {/* Live Indicator */}
+            <div className="flex items-center space-x-2">
+              <div className={`relative flex h-3 w-3 ${wsConnected ? 'animate-pulse' : ''}`}>
+                <span className={`absolute inline-flex h-full w-full rounded-full ${wsConnected ? 'bg-green-400' : 'bg-gray-400'} opacity-75`}></span>
+                <span className={`relative inline-flex rounded-full h-3 w-3 ${wsConnected ? 'bg-green-500' : 'bg-gray-500'}`}></span>
+              </div>
+              <span className={`text-sm font-medium ${wsConnected ? 'text-green-400' : 'text-gray-400'}`}>
+                {wsConnected ? 'Live System Active' : 'Connecting...'}
+              </span>
+            </div>
+            
             <div className="flex items-center space-x-4">
               <Button
                 data-testid="nav-dashboard-btn"
@@ -232,6 +292,40 @@ const Dashboard = () => {
           </>
         )}
       </div>
+      
+      {/* Live Activity Feed - Fixed Position */}
+      {activityFeed.length > 0 && (
+        <div className="fixed bottom-6 right-6 w-96 max-h-96 overflow-y-auto bg-[#0B1120]/95 backdrop-blur-xl border border-blue-500/30 rounded-2xl p-4 shadow-2xl">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-white flex items-center">
+              <Activity className="h-5 w-5 mr-2 text-blue-400" />
+              Live Activity
+            </h3>
+            <span className="text-xs text-gray-400">{activityFeed.length} events</span>
+          </div>
+          <div className="space-y-3">
+            {activityFeed.map((event, idx) => (
+              <div 
+                key={event.id}
+                className="p-3 bg-gradient-to-br from-blue-950/40 to-purple-950/30 rounded-lg border border-blue-500/20 animate-in fade-in slide-in-from-right duration-300"
+                style={{ animationDelay: `${idx * 50}ms` }}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="text-sm font-medium text-white">{event.category}</div>
+                  <div className="text-xs text-gray-400">
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </div>
+                </div>
+                <div className="text-sm text-gray-300 mb-2">{event.title}</div>
+                <div className="flex items-center space-x-4 text-xs text-gray-400">
+                  <span>👥 {event.citizens} citizens</span>
+                  <span>📧 {event.notifications} notifications</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

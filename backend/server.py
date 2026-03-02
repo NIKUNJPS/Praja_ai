@@ -1,10 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import WebSocket, WebSocketDisconnect
 from dotenv import load_dotenv
 from pathlib import Path
 import logging
 from database import init_db
 from routers import auth, states, booths, citizens, analytics, graph, civic_works
+from websocket import connection_manager
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -38,6 +40,42 @@ async def startup_event():
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialized successfully")
+
+
+@app.websocket("/ws/live-alerts")
+async def websocket_live_alerts(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time live alerts
+    Supports: civic work events, notifications, health updates
+    """
+    await connection_manager.connect(websocket)
+    
+    try:
+        # Send welcome message
+        await connection_manager.send_personal_message({
+            "type": "connection_established",
+            "message": "Connected to ICIOS Live Intelligence",
+            "timestamp": logging.Formatter.converter(None)
+        }, websocket)
+        
+        # Keep connection alive and listen for messages
+        while True:
+            # Receive message (for future client-to-server communication)
+            data = await websocket.receive_text()
+            
+            # Echo back (for testing)
+            if data == "ping":
+                await connection_manager.send_personal_message({
+                    "type": "pong",
+                    "timestamp": logging.Formatter.converter(None)
+                }, websocket)
+    
+    except WebSocketDisconnect:
+        await connection_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await connection_manager.disconnect(websocket)
+
 
 @app.get("/api/health")
 async def health_check():
