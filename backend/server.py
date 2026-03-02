@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import logging
 from database import init_db
-from routers import auth, states, booths, citizens
+from routers import auth, states, booths, citizens, analytics
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -29,6 +29,7 @@ app.include_router(auth.router)
 app.include_router(states.router)
 app.include_router(booths.router)
 app.include_router(citizens.router)
+app.include_router(analytics.router)
 
 @app.on_event("startup")
 async def startup_event():

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
 const AuthContext = createContext(null);
@@ -10,36 +10,63 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('access_token'));
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (token) {
-      fetchCurrentUser();
-    } else {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  const logout = useCallback(() => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    setToken(null);
+    setUser(null);
+  }, []);
 
-  const fetchCurrentUser = async () => {
+  const fetchCurrentUser = useCallback(async () => {
+    if (!token) {
+      console.log('[Auth] No token found, skipping user fetch');
+      setLoading(false);
+      return;
+    }
+
     try {
+      console.log('[Auth] Fetching user with token:', token?.substring(0, 20) + '...');
       const response = await axios.get(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('[Auth] User fetched successfully:', response.data);
       setUser(response.data);
     } catch (error) {
-      console.error('Failed to fetch user:', error);
+      console.error('[Auth] Failed to fetch user:', error.response?.data || error.message);
       logout();
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, logout]);
+
+  useEffect(() => {
+    fetchCurrentUser();
+  }, [fetchCurrentUser]);
 
   const login = async (email, password) => {
-    const response = await axios.post(`${API_URL}/api/auth/login`, { email, password });
-    const { access_token, refresh_token } = response.data;
-    localStorage.setItem('access_token', access_token);
-    localStorage.setItem('refresh_token', refresh_token);
-    setToken(access_token);
-    return response.data;
+    try {
+      console.log('[Auth] Login attempt for:', email);
+      const response = await axios.post(`${API_URL}/api/auth/login`, { email, password });
+      const { access_token, refresh_token } = response.data;
+      
+      console.log('[Auth] Login successful, storing tokens');
+      localStorage.setItem('access_token', access_token);
+      localStorage.setItem('refresh_token', refresh_token);
+      setToken(access_token);
+      
+      // Fetch user data immediately after setting token
+      console.log('[Auth] Fetching user data after login');
+      const userResponse = await axios.get(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${access_token}` }
+      });
+      console.log('[Auth] User data fetched:', userResponse.data);
+      setUser(userResponse.data);
+      
+      return response.data;
+    } catch (error) {
+      console.error('[Auth] Login failed:', error.response?.data || error.message);
+      throw error;
+    }
   };
 
   const register = async (email, password, name, role = 'PublicViewer') => {
@@ -50,13 +77,6 @@ export const AuthProvider = ({ children }) => {
       role 
     });
     return response.data;
-  };
-
-  const logout = () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    setToken(null);
-    setUser(null);
   };
 
   return (
