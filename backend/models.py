@@ -94,6 +94,8 @@ class Citizen(Base):
     language_preference = Column(String(20), default="English")
     segment_tags = Column(JSON, default=list)
     influence_score = Column(Float, default=0.0)
+    ai_segment_confidence = Column(Float, default=0.0)
+    last_segmented_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     booth = relationship("Booth", back_populates="citizens")

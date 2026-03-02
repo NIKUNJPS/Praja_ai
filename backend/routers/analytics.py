@@ -4,6 +4,7 @@ from sqlalchemy import func
 from typing import List, Dict, Any
 from database import get_db
 import models
+import segmentation_service
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
 
@@ -193,4 +194,70 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         "open_issues": open_issues,
         "sentiment_trend": round(recent_sentiments, 3),
         "scheme_coverage_pct": round((active_beneficiaries / total_citizens * 100), 2) if total_citizens > 0 else 0
+    }
+
+
+@router.post("/run-segmentation")
+async def run_segmentation(
+    method: str = "deterministic",
+    db: Session = Depends(get_db)
+):
+    """
+    Run AI segmentation engine
+    Methods: deterministic, kmeans, hybrid
+    """
+    
+    if method == "deterministic":
+        updated = segmentation_service.deterministic_segmentation(db)
+        return {
+            "status": "success",
+            "method": "deterministic",
+            "citizens_updated": updated,
+            "message": "Rule-based segmentation completed"
+        }
+    
+    elif method == "kmeans":
+        updated = segmentation_service.kmeans_refinement(db)
+        return {
+            "status": "success",
+            "method": "kmeans",
+            "citizens_updated": updated,
+            "message": "KMeans clustering completed"
+        }
+    
+    elif method == "hybrid":
+        # Run deterministic first, then KMeans
+        updated_det = segmentation_service.deterministic_segmentation(db)
+        updated_km = segmentation_service.kmeans_refinement(db)
+        return {
+            "status": "success",
+            "method": "hybrid",
+            "citizens_updated": updated_det + updated_km,
+            "deterministic_count": updated_det,
+            "kmeans_count": updated_km,
+            "message": "Hybrid segmentation completed"
+        }
+    
+    else:
+        return {"status": "error", "message": "Invalid method"}
+
+@router.get("/segment-summary")
+async def get_segment_summary(db: Session = Depends(get_db)):
+    """
+    Get segment distribution and statistics
+    Returns segment counts, percentages, top segments per booth
+    """
+    return segmentation_service.get_segment_summary(db)
+
+@router.get("/segments-distribution")
+async def get_segments_distribution(db: Session = Depends(get_db)):
+    """
+    Get detailed segment distribution for visualizations
+    """
+    summary = segmentation_service.get_segment_summary(db)
+    return {
+        "segments": summary["segment_distribution"],
+        "total_citizens": summary["total_citizens"],
+        "coverage": summary["segmentation_coverage"],
+        "avg_confidence": summary["avg_confidence"]
     }
