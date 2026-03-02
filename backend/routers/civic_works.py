@@ -5,6 +5,7 @@ Trigger hyper-local notification engine on civic work creation
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel
@@ -166,7 +167,7 @@ async def get_civic_work_detail(work_id: int, db: Session = Depends(get_db)):
         return {"error": "Civic work not found"}
     
     # Get notification count
-    notification_count = db.query(models.func.count(models.Notification.id)).filter(
+    notification_count = db.query(func.count(models.Notification.id)).filter(
         models.Notification.work_id == work_id
     ).scalar() or 0
     

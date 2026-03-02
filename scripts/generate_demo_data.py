@@ -68,8 +68,22 @@ def generate_demo_data():
         db.query(models.State).delete()
         db.query(models.GovernmentScheme).delete()
         db.query(models.Segment).delete()
+        db.query(models.User).delete()
         db.commit()
         print("✅ Cleared existing data")
+        
+        # Create Super Admin user
+        print("\n👤 Creating Super Admin User...")
+        from auth import get_password_hash
+        super_admin = models.User(
+            email="superadmin@iciss.gov.in",
+            password_hash=get_password_hash("superadmin"),
+            name="Super Administrator",
+            role=models.UserRole.SUPER_ADMIN
+        )
+        db.add(super_admin)
+        db.commit()
+        print("✅ Created Super Admin (superadmin@iciss.gov.in / superadmin)")
         
         # Create States
         print("\n🗺️  Creating 5 States...")
