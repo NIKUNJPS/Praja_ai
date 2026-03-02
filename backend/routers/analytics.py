@@ -1,12 +1,26 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta, timezone
 from database import get_db
 import models
 import segmentation_service
+import sentiment_service
+from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analytics", tags=["Analytics"])
+
+# Request models
+class SentimentAnalysisRequest(BaseModel):
+    text: str
+    citizen_id: Optional[int] = None
+    
+class BatchSentimentRequest(BaseModel):
+    limit: int = 1000
 
 @router.get("/booth-health")
 async def get_booth_health_intelligence(
@@ -243,11 +257,186 @@ async def run_segmentation(
 
 @router.get("/segment-summary")
 async def get_segment_summary(db: Session = Depends(get_db)):
-    """
-    Get segment distribution and statistics
-    Returns segment counts, percentages, top segments per booth
-    """
+    """Get segment distribution and statistics"""
     return segmentation_service.get_segment_summary(db)
+
+@router.post("/analyze-sentiment")
+async def analyze_sentiment(
+    request: SentimentAnalysisRequest,
+    db: Session = Depends(get_db)
+):
+    """Analyze sentiment for a single text. Supports English, Hindi, Marathi"""
+    
+    pipeline = sentiment_service.SentimentPipeline()
+    result = pipeline.process(request.text)
+    
+    # If citizen_id provided, store in database
+    if request.citizen_id:
+        citizen = db.query(models.Citizen).filter(models.Citizen.id == request.citizen_id).first()
+        
+        if citizen:
+            sentiment_log = models.SentimentLog(
+                citizen_id=request.citizen_id,
+                booth_id=citizen.booth_id,
+                text=result['text'],
+                language=result['language'],
+                sentiment_score=result['sentiment_score'],
+                sentiment_label=result['sentiment_label'],
+                keywords=result['keywords'],
+                logged_at=datetime.now(timezone.utc)
+            )
+            db.add(sentiment_log)
+            db.commit()
+            db.refresh(sentiment_log)
+            
+            result['stored'] = True
+            result['sentiment_log_id'] = sentiment_log.id
+    
+    return result
+
+@router.post("/batch-sentiment")
+async def batch_sentiment_analysis(
+    request: BatchSentimentRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Process unanalyzed sentiment logs with ML inference"""
+    
+    # Get unprocessed sentiment logs (score = 0.0)
+    logs = db.query(models.SentimentLog).filter(
+        models.SentimentLog.sentiment_score == 0.0
+    ).limit(request.limit).all()
+    
+    if not logs:
+        return {
+            "status": "no_data",
+            "message": "No unprocessed sentiment logs found",
+            "processed": 0
+        }
+    
+    pipeline = sentiment_service.SentimentPipeline()
+    processed_count = 0
+    
+    for log in logs:
+        try:
+            # Run sentiment analysis
+            result = pipeline.process(log.text)
+            
+            # Update log
+            log.language = result['language']
+            log.sentiment_score = result['sentiment_score']
+            log.sentiment_label = result['sentiment_label']
+            log.keywords = result['keywords']
+            
+            processed_count += 1
+            
+        except Exception as e:
+            logger.error(f"Failed to process sentiment log {log.id}: {e}")
+            continue
+    
+    db.commit()
+    
+    return {
+        "status": "success",
+        "processed": processed_count,
+        "total_logs": len(logs),
+        "message": f"Processed {processed_count} sentiment logs"
+    }
+
+@router.get("/sentiment-trends")
+async def get_sentiment_trends(
+    days: int = 30,
+    booth_id: int = None,
+    db: Session = Depends(get_db)
+):
+    """Get sentiment trends for last N days with positive/neutral/negative counts"""
+    
+    # Calculate date threshold
+    threshold_date = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    # Base query
+    query = db.query(models.SentimentLog).filter(
+        models.SentimentLog.logged_at >= threshold_date
+    )
+    
+    if booth_id:
+        query = query.filter(models.SentimentLog.booth_id == booth_id)
+    
+    logs = query.all()
+    
+    if not logs:
+        return {
+            "days": days,
+            "booth_id": booth_id,
+            "total_logs": 0,
+            "sentiment_counts": {"Positive": 0, "Neutral": 0, "Negative": 0},
+            "avg_sentiment_score": 0.0,
+            "momentum": "neutral"
+        }
+    
+    # Count by sentiment label
+    sentiment_counts = {"Positive": 0, "Neutral": 0, "Negative": 0}
+    total_score = 0.0
+    
+    for log in logs:
+        sentiment_counts[log.sentiment_label] = sentiment_counts.get(log.sentiment_label, 0) + 1
+        total_score += log.sentiment_score
+    
+    avg_score = total_score / len(logs) if logs else 0
+    
+    # Calculate momentum (positive/negative ratio)
+    if sentiment_counts["Negative"] > 0:
+        momentum_ratio = sentiment_counts["Positive"] / sentiment_counts["Negative"]
+    else:
+        momentum_ratio = sentiment_counts["Positive"] if sentiment_counts["Positive"] > 0 else 1.0
+    
+    if momentum_ratio > 1.5:
+        momentum = "positive"
+    elif momentum_ratio < 0.7:
+        momentum = "negative"
+    else:
+        momentum = "neutral"
+    
+    # Booth-wise aggregation
+    booth_sentiments = []
+    if not booth_id:
+        # Get top 10 booths by sentiment activity
+        booth_data = db.query(
+            models.SentimentLog.booth_id,
+            func.count(models.SentimentLog.id).label('count'),
+            func.avg(models.SentimentLog.sentiment_score).label('avg_score')
+        ).filter(
+            models.SentimentLog.logged_at >= threshold_date,
+            models.SentimentLog.booth_id.isnot(None)
+        ).group_by(
+            models.SentimentLog.booth_id
+        ).order_by(
+            func.count(models.SentimentLog.id).desc()
+        ).limit(10).all()
+        
+        for booth_id, count, avg_score in booth_data:
+            booth = db.query(models.Booth).filter(models.Booth.id == booth_id).first()
+            if booth:
+                booth_sentiments.append({
+                    "booth_id": booth_id,
+                    "booth_name": booth.name,
+                    "sentiment_count": count,
+                    "avg_sentiment_score": round(float(avg_score), 3)
+                })
+    
+    return {
+        "days": days,
+        "booth_id": booth_id,
+        "total_logs": len(logs),
+        "sentiment_counts": sentiment_counts,
+        "avg_sentiment_score": round(avg_score, 3),
+        "avg_sentiment_normalized": round(((avg_score + 1) / 2) * 100, 2),
+        "momentum": momentum,
+        "booth_sentiments": booth_sentiments[:10]
+    }
+
+import logging
+logger = logging.getLogger(__name__)
 
 @router.get("/segments-distribution")
 async def get_segments_distribution(db: Session = Depends(get_db)):

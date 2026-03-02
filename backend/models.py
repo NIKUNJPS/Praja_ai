@@ -170,6 +170,7 @@ class SentimentLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     citizen_id = Column(Integer, ForeignKey("citizens.id"), nullable=False)
+    booth_id = Column(Integer, ForeignKey("booths.id"), nullable=True)
     text = Column(Text, nullable=False)
     language = Column(String(20), default="English")
     sentiment_score = Column(Float, default=0.0)
@@ -178,6 +179,7 @@ class SentimentLog(Base):
     logged_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     citizen = relationship("Citizen", back_populates="sentiments")
+    booth = relationship("Booth", backref="sentiment_logs")
 
 class Notification(Base):
     __tablename__ = "notifications"
