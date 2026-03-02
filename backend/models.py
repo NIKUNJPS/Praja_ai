@@ -59,6 +59,7 @@ class Booth(Base):
     health_score = Column(Float, default=50.0)
     risk_level = Column(String(20), default="Medium")
     engagement_index = Column(Float, default=50.0)
+    avg_sentiment = Column(Float, default=0.0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     constituency = relationship("Constituency", back_populates="booths")
@@ -94,8 +95,10 @@ class Citizen(Base):
     language_preference = Column(String(20), default="English")
     segment_tags = Column(JSON, default=list)
     influence_score = Column(Float, default=0.0)
+    influence_rank = Column(Integer, default=0)
     ai_segment_confidence = Column(Float, default=0.0)
     last_segmented_at = Column(DateTime, nullable=True)
+    last_influence_updated = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     
     booth = relationship("Booth", back_populates="citizens")

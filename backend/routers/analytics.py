@@ -7,6 +7,7 @@ from database import get_db
 import models
 import segmentation_service
 import sentiment_service
+import influence_service
 from pydantic import BaseModel
 import logging
 
@@ -450,3 +451,36 @@ async def get_segments_distribution(db: Session = Depends(get_db)):
         "coverage": summary["segmentation_coverage"],
         "avg_confidence": summary["avg_confidence"]
     }
+
+@router.post("/run-influence")
+async def run_influence_scoring(
+    mode: str = "demo",
+    limit: int = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Run influence scoring engine with NetworkX
+    mode: 'full' or 'demo' (demo is faster ~10-20s)
+    """
+    
+    result = influence_service.run_influence_scoring(db, mode=mode, limit=limit)
+    return result
+
+@router.get("/top-influencers")
+async def get_top_influencers(
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """Get top influencers with enriched data"""
+    
+    influencers = influence_service.get_top_influencers(db, limit=limit)
+    return {
+        "influencers": influencers,
+        "total": len(influencers)
+    }
+
+@router.get("/booth-influence-summary")
+async def get_booth_influence_summary(db: Session = Depends(get_db)):
+    """Get booth-level influence statistics"""
+    
+    return influence_service.get_booth_influence_summary(db)
