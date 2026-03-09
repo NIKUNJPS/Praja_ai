@@ -56,12 +56,13 @@ const Dashboard = () => {
   // Define fetchDashboardData first since it's used by other hooks
   const fetchDashboardData = useCallback(async () => {
     try {
+      // Note: api baseURL already includes /api, so paths are relative to that
       const [statsRes, boothsRes] = await Promise.all([
-        api.get('/api/analytics/dashboard-stats'),
-        api.get('/api/analytics/booth-health?limit=10')
+        api.get('/analytics/dashboard-stats'),
+        api.get('/analytics/booth-health?limit=10')
       ]);
       setStats(statsRes.data);
-      setBoothsHealth(boothsRes.data.booths);
+      setBoothsHealth(boothsRes.data.booths || []);
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error);
     } finally {
@@ -86,7 +87,7 @@ const Dashboard = () => {
       websocketService.off('connection_status', handleConnectionStatus);
       websocketService.off('civic_work_created', handleCivicWorkCreated);
     };
-  }, []);
+  }, [fetchDashboardData]);
 
   const handleConnectionStatus = (status) => {
     setWsConnected(status.connected);
@@ -146,7 +147,7 @@ const Dashboard = () => {
         toast.info('🔍 AI scanning for weak booths...', { duration: 1500 });
         
         try {
-          const response = await api.get('/api/analytics/booth-health?limit=50');
+          const response = await api.get('/analytics/booth-health?limit=50');
           const booths = response.data.booths || [];
           
           // Find the booth with lowest health score
@@ -183,7 +184,7 @@ const Dashboard = () => {
         const category = categories[Math.floor(Math.random() * categories.length)];
         
         try {
-          const response = await api.post('/api/civic-works/create', {
+          const response = await api.post('/civic-works/', {
             booth_id: currentWeakBooth.booth_id,
             title: `Emergency ${category} - ${currentWeakBooth.booth_name}`,
             description: `AI-triggered intervention for booth health improvement`,
@@ -196,12 +197,12 @@ const Dashboard = () => {
           demoDataRef.current = {
             ...demoDataRef.current,
             civicWork: response.data,
-            notificationsCount: response.data.notifications_created
+            notificationsCount: response.data.affected_citizens || 0
           };
           setDemoData(prev => ({
             ...prev,
             civicWork: response.data,
-            notificationsCount: response.data.notifications_created
+            notificationsCount: response.data.affected_citizens || 0
           }));
           
           toast.success(`✅ Intervention Created: ${category}`, {
@@ -239,7 +240,7 @@ const Dashboard = () => {
         
         try {
           // Refresh booth health data
-          const response = await api.get('/api/analytics/booth-health?limit=50');
+          const response = await api.get('/analytics/booth-health?limit=50');
           const booths = response.data.booths || [];
           setBoothsHealth(booths.slice(0, 10));
           
@@ -270,7 +271,7 @@ const Dashboard = () => {
         const currentWeakBooth = demoDataRef.current.weakBooth;
         
         try {
-          const response = await api.get('/api/analytics/top-influencers?limit=5');
+          const response = await api.get('/analytics/top-influencers?limit=5');
           const influencers = response.data.influencers || [];
           
           demoDataRef.current = { ...demoDataRef.current, influencers };
@@ -282,10 +283,8 @@ const Dashboard = () => {
             icon: <Users className="h-5 w-5 text-purple-400" />
           });
           
-          // Navigate to network graph after a short delay
-          setTimeout(() => {
-            // Optional: navigate('/network');
-          }, 1000);
+          // Navigate to network graph after a short delay (optional)
+          // setTimeout(() => navigate('/network'), 1000);
         } catch (error) {
           console.error('Demo Step 5 error:', error);
         }

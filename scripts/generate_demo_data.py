@@ -1,5 +1,10 @@
 import sys
-sys.path.append('/app/backend')
+import os
+
+# Add backend folder to Python path (cross-platform)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BACKEND_DIR = os.path.join(BASE_DIR, "backend")
+sys.path.insert(0, BACKEND_DIR)
 
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine
@@ -79,11 +84,33 @@ def generate_demo_data():
             email="superadmin@iciss.gov.in",
             password_hash=get_password_hash("superadmin"),
             name="Super Administrator",
-            role=models.UserRole.SUPER_ADMIN
+            role=models.UserRole.SUPER_ADMIN,
+            is_verified=True  # ✅ Mark as verified so they can log in immediately
         )
         db.add(super_admin)
         db.commit()
         print("✅ Created Super Admin (superadmin@iciss.gov.in / superadmin)")
+
+        # Create additional test users with different roles (all verified)
+        print("\n👥 Creating additional test users...")
+        test_users = [
+            ("stateadmin@iciss.gov.in", "stateadmin", "State Admin", models.UserRole.STATE_ADMIN),
+            ("constituencymanager@iciss.gov.in", "constmanager", "Constituency Manager", models.UserRole.CONSTITUENCY_MANAGER),
+            ("boothofficer@iciss.gov.in", "booth123", "Booth Officer", models.UserRole.BOOTH_OFFICER),
+            ("analyst@iciss.gov.in", "analyst456", "Analyst", models.UserRole.ANALYST),
+            ("publicviewer@iciss.gov.in", "viewer789", "Public Viewer", models.UserRole.PUBLIC_VIEWER),
+        ]
+        for email, pwd, name, role in test_users:
+            user = models.User(
+                email=email,
+                password_hash=get_password_hash(pwd),
+                name=name,
+                role=role,
+                is_verified=True
+            )
+            db.add(user)
+        db.commit()
+        print("✅ Created test users: stateadmin, constituencymanager, boothofficer, analyst, publicviewer")
         
         # Create States
         print("\n🗺️  Creating 5 States...")

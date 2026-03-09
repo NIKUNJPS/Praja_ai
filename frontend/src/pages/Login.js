@@ -11,18 +11,27 @@ const Login = () => {
   const { login } = useAuth();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
+  const [unverifiedEmail, setUnverifiedEmail] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setUnverifiedEmail(null);
     setLoading(true);
 
     try {
       await login(formData.email, formData.password);
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid credentials');
+      // Check for specific error responses
+      const detail = err.response?.data?.detail || 'Invalid credentials';
+      setError(detail);
+
+      // If email is not verified, store the email for resend option
+      if (err.response?.status === 403 && detail.toLowerCase().includes('not verified')) {
+        setUnverifiedEmail(formData.email);
+      }
     } finally {
       setLoading(false);
     }
@@ -45,7 +54,17 @@ const Login = () => {
         {error && (
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start" data-testid="login-error-message">
             <AlertCircle className="h-5 w-5 text-red-400 mr-3 flex-shrink-0 mt-0.5" />
-            <p className="text-red-400 text-sm">{error}</p>
+            <div className="text-red-400 text-sm">
+              <p>{error}</p>
+              {unverifiedEmail && (
+                <Link
+                  to={`/verify-otp?email=${encodeURIComponent(unverifiedEmail)}&purpose=registration`}
+                  className="mt-2 inline-block text-blue-400 hover:text-blue-300 underline"
+                >
+                  Resend verification OTP
+                </Link>
+              )}
+            </div>
           </div>
         )}
 
@@ -67,10 +86,18 @@ const Login = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              <Lock className="inline h-4 w-4 mr-2" />
-              Password
-            </label>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-300">
+                <Lock className="inline h-4 w-4 mr-2" />
+                Password
+              </label>
+              <Link
+                to="/forgot-password"
+                className="text-sm text-blue-400 hover:text-blue-300"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <Input
               data-testid="login-password-input"
               type="password"

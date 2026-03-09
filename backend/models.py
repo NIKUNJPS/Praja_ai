@@ -20,7 +20,21 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     name = Column(String(255), nullable=False)
     role = Column(SQLEnum(UserRole), nullable=False, default=UserRole.PUBLIC_VIEWER)
+    is_verified = Column(Boolean, default=False)
+    reset_token = Column(String(255), nullable=True)
+    reset_token_expiry = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class OTP(Base):
+    __tablename__ = "otps"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), index=True, nullable=False)
+    otp_code = Column(String(6), nullable=False)
+    purpose = Column(String(50), nullable=False)          # "registration" or "password_reset"
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    used = Column(Boolean, default=False)
 
 class State(Base):
     __tablename__ = "states"

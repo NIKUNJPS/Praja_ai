@@ -1,11 +1,15 @@
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+const API_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
+// Request interceptor to add token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
@@ -17,6 +21,7 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Response interceptor to handle token refresh
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -28,7 +33,7 @@ api.interceptors.response.use(
       
       if (refreshToken) {
         try {
-          const response = await axios.post(`${API_URL}/api/auth/refresh`, { 
+          const response = await axios.post(`${API_URL}/auth/refresh`, { 
             refresh_token: refreshToken 
           });
           

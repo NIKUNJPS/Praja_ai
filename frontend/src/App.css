@@ -1,3 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom global styles (if any) can be added here */
+
 .App {
   min-height: 100vh;
 }

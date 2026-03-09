@@ -4,8 +4,8 @@ Automatic citizen targeting and multilingual message generation
 """
 
 import logging
-from typing import List, Dict, Tuple
-from datetime import datetime, timezone
+from typing import List, Dict, Optional
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import models
@@ -111,15 +111,13 @@ DEFAULT_TEMPLATE = {
 def get_affected_citizens(db: Session, civic_work: models.CivicWork) -> List[models.Citizen]:
     """
     Smart targeting: Identify citizens affected by civic work
-    
+
     Priority:
     1. Citizens on directly affected streets
     2. Citizens in same booth (broader reach)
-    3. Optional: Filter by relevant segments
     """
-    
     affected_citizens = []
-    
+
     # Primary targeting: Affected streets
     if civic_work.affected_streets:
         for street_id in civic_work.affected_streets:
@@ -128,7 +126,7 @@ def get_affected_citizens(db: Session, civic_work: models.CivicWork) -> List[mod
             ).all()
             affected_citizens.extend(street_citizens)
             logger.info(f"Found {len(street_citizens)} citizens on street {street_id}")
-    
+
     # Secondary targeting: Same booth (if no affected streets specified)
     if not affected_citizens:
         booth_citizens = db.query(models.Citizen).filter(
@@ -136,12 +134,10 @@ def get_affected_citizens(db: Session, civic_work: models.CivicWork) -> List[mod
         ).limit(500).all()  # Limit for performance
         affected_citizens.extend(booth_citizens)
         logger.info(f"No streets specified, targeting {len(booth_citizens)} booth citizens")
-    
+
     # Remove duplicates
     unique_citizens = list({c.id: c for c in affected_citizens}.values())
-    
     logger.info(f"Total unique citizens affected: {len(unique_citizens)}")
-    
     return unique_citizens
 
 
@@ -151,35 +147,26 @@ def generate_multilingual_message(
     language: str = "en"
 ) -> str:
     """
-    Generate personalized multilingual message for civic work
-    
+    Generate personalized multilingual message for civic work.
+
     Args:
         civic_work: CivicWork object
         street_name: Name of the street
         language: 'en', 'hi', or 'mr'
-    
+
     Returns:
         Formatted message in specified language
     """
-    
-    # Get template for work category and language
-    work_category = civic_work.category
-    templates = WORK_TEMPLATES.get(work_category, {})
-    
+    templates = WORK_TEMPLATES.get(civic_work.category, {})
     if language in templates:
         template = templates[language]["template"]
     else:
-        # Fallback to default template
         template = DEFAULT_TEMPLATE.get(language, DEFAULT_TEMPLATE["en"])
-    
-    # Format message with work details
-    message = template.format(
-        work_type=work_category,
+
+    return template.format(
         street_name=street_name,
         budget=civic_work.budget or 0
     )
-    
-    return message
 
 
 def create_notifications_bulk(
@@ -188,77 +175,71 @@ def create_notifications_bulk(
     citizens: List[models.Citizen]
 ) -> int:
     """
-    Bulk create notifications for affected citizens
-    Optimized for 100-500 citizens per civic work
-    
-    Returns: Number of notifications created
+    Bulk create notifications for affected citizens.
+    Optimised for 100‑500 citizens per civic work.
+
+    Returns: Number of notifications created.
     """
-    
     if not citizens:
         return 0
-    
+
     start_time = datetime.now(timezone.utc)
-    
+
+    # Pre‑fetch street names to avoid N+1 queries
+    street_ids = {c.street_id for c in citizens if c.street_id}
+    streets = db.query(models.Street).filter(models.Street.id.in_(street_ids)).all()
+    street_map = {s.id: s.name for s in streets}
+
     notifications = []
-    
     for citizen in citizens:
-        # Get street name
-        street = db.query(models.Street).filter(models.Street.id == citizen.street_id).first()
-        street_name = street.name if street else "your area"
-        
-        # Generate messages in all languages
-        message_en = generate_multilingual_message(civic_work, street_name, "en")
-        message_hi = generate_multilingual_message(civic_work, street_name, "hi")
-        message_mr = generate_multilingual_message(civic_work, street_name, "mr")
-        
-        # Use citizen's preferred language as primary message
-        lang_map = {"English": message_en, "Hindi": message_hi, "Marathi": message_mr}
-        primary_message = lang_map.get(citizen.language_preference, message_en)
-        
-        # Create notification object
-        notification = models.Notification(
+        street_name = street_map.get(citizen.street_id, "your area")
+
+        msg_en = generate_multilingual_message(civic_work, street_name, "en")
+        msg_hi = generate_multilingual_message(civic_work, street_name, "hi")
+        msg_mr = generate_multilingual_message(civic_work, street_name, "mr")
+
+        lang_map = {"English": msg_en, "Hindi": msg_hi, "Marathi": msg_mr}
+        primary_message = lang_map.get(citizen.language_preference, msg_en)
+
+        notifications.append(models.Notification(
             citizen_id=citizen.id,
             booth_id=citizen.booth_id,
             work_id=civic_work.id,
             message=primary_message,
-            message_en=message_en,
-            message_hi=message_hi,
-            message_mr=message_mr,
+            message_en=msg_en,
+            message_hi=msg_hi,
+            message_mr=msg_mr,
             language=citizen.language_preference,
             delivery_status="sent",
             delivered=True
-        )
-        
-        notifications.append(notification)
-    
-    # Bulk insert
-    db.bulk_save_objects(notifications)
-    db.commit()
-    
+        ))
+
+    try:
+        db.bulk_save_objects(notifications)
+        db.commit()
+    except Exception as e:
+        logger.error(f"Failed to bulk insert notifications: {e}", exc_info=True)
+        db.rollback()
+        return 0
+
     end_time = datetime.now(timezone.utc)
     execution_time = (end_time - start_time).total_seconds()
-    
     logger.info(f"Created {len(notifications)} notifications in {execution_time:.2f}s")
-    
     return len(notifications)
 
 
 def get_notification_summary(db: Session) -> Dict:
     """
-    Get notification statistics for dashboard
+    Get notification statistics for dashboard.
     """
-    
-    total_notifications = db.query(func.count(models.Notification.id)).scalar() or 0
-    
-    # Last 24 hours
-    from datetime import timedelta
+    total = db.query(func.count(models.Notification.id)).scalar() or 0
     last_24h_threshold = datetime.now(timezone.utc) - timedelta(hours=24)
-    last_24h_count = db.query(func.count(models.Notification.id)).filter(
+    last_24h = db.query(func.count(models.Notification.id)).filter(
         models.Notification.sent_at >= last_24h_threshold
     ).scalar() or 0
-    
-    # By booth (top 10)
-    booth_notifications = db.query(
+
+    # Top 10 booths by notification count
+    booth_stats = db.query(
         models.Booth.id,
         models.Booth.name,
         func.count(models.Notification.id).label('count')
@@ -269,61 +250,67 @@ def get_notification_summary(db: Session) -> Dict:
     ).order_by(
         func.count(models.Notification.id).desc()
     ).limit(10).all()
-    
+
     booth_breakdown = [
         {"booth_id": b.id, "booth_name": b.name, "notifications": b.count}
-        for b in booth_notifications
+        for b in booth_stats
     ]
-    
-    # By segment (estimate based on citizen segments)
-    segment_notifications = {}
+
+    # Segment breakdown (using citizen segment tags)
+    # This is an estimate – for large datasets consider a materialised view
+    segment_counts = {}
     notifications = db.query(models.Notification).limit(1000).all()
-    
     for notif in notifications:
         citizen = db.query(models.Citizen).filter(models.Citizen.id == notif.citizen_id).first()
         if citizen and citizen.segment_tags:
-            for segment in citizen.segment_tags:
-                segment_notifications[segment] = segment_notifications.get(segment, 0) + 1
-    
-    # Delivery stats
-    delivered_count = db.query(func.count(models.Notification.id)).filter(
+            for seg in citizen.segment_tags:
+                segment_counts[seg] = segment_counts.get(seg, 0) + 1
+
+    segment_breakdown = [
+        {"segment": k, "count": v}
+        for k, v in sorted(segment_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    ]
+
+    delivered = db.query(func.count(models.Notification.id)).filter(
         models.Notification.delivered == True
     ).scalar() or 0
-    
+
     return {
-        "total_notifications": total_notifications,
-        "last_24h_count": last_24h_count,
-        "delivered_count": delivered_count,
-        "delivery_rate": round((delivered_count / total_notifications * 100), 2) if total_notifications > 0 else 0,
+        "total_notifications": total,
+        "last_24h_count": last_24h,
+        "delivered_count": delivered,
+        "delivery_rate": round((delivered / total * 100), 2) if total > 0 else 0,
         "booth_breakdown": booth_breakdown,
-        "segment_breakdown": [
-            {"segment": k, "count": v} 
-            for k, v in sorted(segment_notifications.items(), key=lambda x: x[1], reverse=True)[:10]
-        ]
+        "segment_breakdown": segment_breakdown
     }
 
 
 def get_recent_notifications(db: Session, limit: int = 50) -> List[Dict]:
-    """Get recent notifications with citizen and work details"""
-    
+    """
+    Get recent notifications with citizen and work details.
+    """
     notifications = db.query(models.Notification).order_by(
         models.Notification.sent_at.desc()
     ).limit(limit).all()
-    
+
     results = []
     for notif in notifications:
         citizen = db.query(models.Citizen).filter(models.Citizen.id == notif.citizen_id).first()
         work = db.query(models.CivicWork).filter(models.CivicWork.id == notif.work_id).first()
-        
+
+        msg = notif.message
+        if len(msg) > 100:
+            msg = msg[:100] + "..."
+
         results.append({
             "notification_id": notif.id,
             "citizen_name": citizen.name if citizen else "Unknown",
             "work_title": work.title if work else "N/A",
             "work_category": work.category if work else "N/A",
-            "message": notif.message[:100] + "..." if len(notif.message) > 100 else notif.message,
+            "message": msg,
             "language": notif.language,
             "delivery_status": notif.delivery_status,
-            "sent_at": notif.sent_at
+            "sent_at": notif.sent_at.isoformat() if notif.sent_at else None
         })
-    
+
     return results

@@ -9,6 +9,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def get_db():
+    """
+    Dependency that provides a database session and ensures it's closed after the request.
+    """
     db = SessionLocal()
     try:
         yield db
@@ -16,5 +19,9 @@ def get_db():
         db.close()
 
 def init_db():
+    """
+    Create all database tables.
+    Import all models so they are registered with Base.
+    """
     import models
     Base.metadata.create_all(bind=engine)

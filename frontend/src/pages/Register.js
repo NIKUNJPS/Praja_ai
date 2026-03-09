@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Shield, Mail, Lock, User, AlertCircle, CheckCircle } from 'lucide-react';
+import { Shield, Mail, Lock, User, AlertCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card } from '../components/ui/card';
@@ -17,7 +17,6 @@ const Register = () => {
     role: 'PublicViewer'
   });
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -27,10 +26,25 @@ const Register = () => {
 
     try {
       await registerUser(formData.email, formData.password, formData.name, formData.role);
-      setSuccess(true);
-      setTimeout(() => navigate('/login'), 2000);
+      navigate(`/verify-otp?email=${encodeURIComponent(formData.email)}&purpose=registration`);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Registration failed');
+      console.error('Registration error:', err.response?.data || err.message);
+      
+      // Extract error message – handle both string and array formats
+      let errorMsg = 'Registration failed';
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          // Validation error: take the first message
+          errorMsg = err.response.data.detail[0]?.msg || errorMsg;
+        } else {
+          errorMsg = err.response.data.detail;
+        }
+      } else if (err.response?.data?.message) {
+        errorMsg = err.response.data.message;
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -54,13 +68,6 @@ const Register = () => {
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start" data-testid="register-error-message">
             <AlertCircle className="h-5 w-5 text-red-400 mr-3 flex-shrink-0 mt-0.5" />
             <p className="text-red-400 text-sm">{error}</p>
-          </div>
-        )}
-
-        {success && (
-          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg flex items-start" data-testid="register-success-message">
-            <CheckCircle className="h-5 w-5 text-green-400 mr-3 flex-shrink-0 mt-0.5" />
-            <p className="text-green-400 text-sm">Registration successful! Redirecting to login...</p>
           </div>
         )}
 
@@ -135,7 +142,7 @@ const Register = () => {
           <Button
             data-testid="register-submit-btn"
             type="submit"
-            disabled={loading || success}
+            disabled={loading}
             className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white py-6 rounded-xl font-medium shadow-lg shadow-blue-500/30"
           >
             {loading ? 'Creating Account...' : 'Create Account'}
